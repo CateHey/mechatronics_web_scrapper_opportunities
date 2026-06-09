@@ -22,16 +22,12 @@ interface ApiResult {
   error?: string;
 }
 
-const COUNTRIES: { code: CountryCode; flag: string; label: string }[] = [
-  { code: "PE", flag: "🇵🇪", label: "Perú" },
-  { code: "AU", flag: "🇦🇺", label: "Australia" },
-];
+type Tab = "PE" | "AU" | "empresas";
+
 const SECTORS: (Sector | "Todos")[] = ["Todos", "Automatización", "Minería", "Energía"];
-const SECTOR_EMOJI: Record<string, string> = {
-  Automatización: "⚙️",
-  Minería: "⛏️",
-  Energía: "⚡",
-};
+const SECTOR_EMOJI: Record<string, string> = { Automatización: "⚙️", Minería: "⛏️", Energía: "⚡" };
+const FLAG: Record<CountryCode, string> = { PE: "🇵🇪", AU: "🇦🇺" };
+const COUNTRY_LABEL: Record<CountryCode, string> = { PE: "Perú", AU: "Australia" };
 const RELIABILITY_LABEL: Record<string, string> = {
   solida: "Fuente sólida",
   parcial: "Fuente parcial",
@@ -40,37 +36,44 @@ const RELIABILITY_LABEL: Record<string, string> = {
 const sectorByCompany = new Map<string, Sector>(COMPANIES.map((c) => [c.name, c.sector]));
 
 export default function Page() {
-  const [tab, setTab] = useState<"vacantes" | "empresas">("vacantes");
-  const [country, setCountry] = useState<CountryCode>("PE");
-  const [data, setData] = useState<ApiResult | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState<Tab>("PE");
+  const [cache, setCache] = useState<Partial<Record<CountryCode, ApiResult>>>({});
+  const [loading, setLoading] = useState<Partial<Record<CountryCode, boolean>>>({});
   const [query, setQuery] = useState("");
   const [sector, setSector] = useState<Sector | "Todos">("Todos");
   const [onlyMech, setOnlyMech] = useState(false);
 
-  async function run(c: CountryCode = country) {
-    setLoading(true);
+  async function run(c: CountryCode) {
+    setLoading((l) => ({ ...l, [c]: true }));
     try {
       const res = await fetch(`/api/jobs?country=${c}&mecatronica=0`);
-      setData((await res.json()) as ApiResult);
+      const json = (await res.json()) as ApiResult;
+      setCache((p) => ({ ...p, [c]: json }));
     } catch {
-      setData({ jobs: [], perSource: {}, errors: ["No se pudo conectar"], generatedAt: "", country: c, error: "fetch" });
+      setCache((p) => ({
+        ...p,
+        [c]: { jobs: [], perSource: {}, errors: ["No se pudo conectar"], generatedAt: "", country: c, error: "fetch" },
+      }));
     } finally {
-      setLoading(false);
+      setLoading((l) => ({ ...l, [c]: false }));
     }
   }
 
   useEffect(() => {
-    run(country);
+    run("PE");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function changeCountry(c: CountryCode) {
-    if (c === country) return;
-    setCountry(c);
+  function selectTab(t: Tab) {
+    setTab(t);
+    setQuery("");
     setSector("Todos");
-    run(c);
+    if ((t === "PE" || t === "AU") && !cache[t] && !loading[t]) run(t);
   }
+
+  const country: CountryCode = tab === "AU" ? "AU" : "PE";
+  const data = cache[country] ?? null;
+  const isLoading = !!loading[country];
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -93,7 +96,6 @@ export default function Page() {
   }, [filtered]);
 
   const mechCount = filtered.filter((j) => j.dominio).length;
-  const companiesForCountry = COMPANIES.filter((c) => c.countries.includes(country));
   let jobIndex = 0;
 
   return (
@@ -104,36 +106,27 @@ export default function Page() {
         <h1>Vacantes Mecatrónica</h1>
         <p>
           Practicantes y junior en las mejores empresas de <b>energía</b>, <b>minería</b> y{" "}
-          <b>automatización industrial</b>. Elige tu país y busca en tiempo real.
+          <b>automatización industrial</b>. Busca en tiempo real.
         </p>
-
-        <div className="country-switch">
-          {COUNTRIES.map((c) => (
-            <button
-              key={c.code}
-              className={`country ${country === c.code ? "active" : ""}`}
-              onClick={() => changeCountry(c.code)}
-            >
-              <span className="flag">{c.flag}</span> {c.label}
-            </button>
-          ))}
-        </div>
       </header>
 
       <div className="tabs">
-        <button className={`tab ${tab === "vacantes" ? "active" : ""}`} onClick={() => setTab("vacantes")}>
-          🔧 Vacantes
+        <button className={`tab ${tab === "PE" ? "active" : ""}`} onClick={() => selectTab("PE")}>
+          🇵🇪 Vacantes Perú
         </button>
-        <button className={`tab ${tab === "empresas" ? "active" : ""}`} onClick={() => setTab("empresas")}>
+        <button className={`tab ${tab === "AU" ? "active" : ""}`} onClick={() => selectTab("AU")}>
+          🇦🇺 Vacantes Australia
+        </button>
+        <button className={`tab ${tab === "empresas" ? "active" : ""}`} onClick={() => selectTab("empresas")}>
           🏢 Empresas y fuentes
         </button>
       </div>
 
-      {tab === "vacantes" && (
+      {(tab === "PE" || tab === "AU") && (
         <>
           <div className="controls">
-            <button className="btn" onClick={() => run()} disabled={loading}>
-              {loading ? "Buscando…" : "🔄 Actualizar"}
+            <button className="btn" onClick={() => run(country)} disabled={isLoading}>
+              {isLoading ? "Buscando…" : "🔄 Actualizar"}
             </button>
             <input
               className="input"
@@ -155,7 +148,7 @@ export default function Page() {
             ))}
           </div>
 
-          {data && !loading && (
+          {data && !isLoading && (
             <div className="stats">
               <div className="stat">
                 <div className="num">{filtered.length}</div>
@@ -172,44 +165,51 @@ export default function Page() {
             </div>
           )}
 
-          {loading && (
+          {isLoading && (
             <div className="state">
               <div className="spinner" />
-              Consultando empresa por empresa… (puede tardar ~15–30 s)
+              Consultando empresa por empresa en {COUNTRY_LABEL[country]}… (puede tardar ~15–30 s)
             </div>
           )}
 
-          {!loading && data && data.errors.length > 0 && (
+          {!isLoading && data && data.errors.length > 0 && (
             <div className="note">
               ⚠️ Algunas fuentes no respondieron (suele ser LinkedIn bloqueando IPs de servidor):{" "}
               {data.errors.map((e) => e.split(":")[0]).join(", ")}. El resto sí se consultó.
             </div>
           )}
 
-          {!loading && data && filtered.length === 0 && (
-            <div className="state">
-              😶 No hay vacantes de practicante/junior con esos filtros ahora mismo.
-              <br />
-              Prueba quitar filtros, cambiar de país, o revisa “Empresas y fuentes”.
+          {tab === "AU" && !isLoading && data && (
+            <div className="note">
+              🇦🇺 Australia es experimental: usa las APIs de ABB, Rockwell, Schneider y MMG (sólidas) más LinkedIn
+              para BHP, Rio Tinto, Fortescue y Woodside (este último puede venir vacío desde el servidor).
             </div>
           )}
 
-          {!loading &&
+          {!isLoading && data && filtered.length === 0 && (
+            <div className="state">
+              😶 No hay vacantes de practicante/junior con esos filtros ahora mismo en {COUNTRY_LABEL[country]}.
+              <br />
+              Prueba quitar filtros o revisa “Empresas y fuentes”.
+            </div>
+          )}
+
+          {!isLoading &&
             grouped.map(([company, jobs]) => {
               const sec = sectorByCompany.get(company);
               return (
                 <div className="group" key={company}>
                   <div className="group-head">
                     <h3>{company}</h3>
-                    {sec && <span className={`badge ${sec}`}>{SECTOR_EMOJI[sec]} {sec}</span>}
+                    {sec && (
+                      <span className={`badge ${sec}`}>
+                        {SECTOR_EMOJI[sec]} {sec}
+                      </span>
+                    )}
                     <span className="count-pill">{jobs.length}</span>
                   </div>
                   {jobs.map((j) => (
-                    <div
-                      className="job"
-                      key={j.id}
-                      style={{ animationDelay: `${Math.min(jobIndex++ * 0.03, 0.6)}s` }}
-                    >
+                    <div className="job" key={j.id} style={{ animationDelay: `${Math.min(jobIndex++ * 0.03, 0.6)}s` }}>
                       <div>
                         <div className="title">
                           {j.dominio && <span className="star">⭐ </span>}
@@ -233,15 +233,19 @@ export default function Page() {
       {tab === "empresas" && (
         <>
           <p style={{ color: "var(--muted)", textAlign: "center", marginBottom: 24 }}>
-            Cómo este buscador obtiene las vacantes de cada empresa en{" "}
-            <b>{COUNTRIES.find((c) => c.code === country)?.label}</b> y los links oficiales para postular.
+            Cómo este buscador obtiene las vacantes de cada empresa (verificado el 09/06/2026) y los links
+            oficiales para postular.
           </p>
           <div className="companies-grid">
-            {companiesForCountry.map((c) => (
+            {COMPANIES.map((c) => (
               <div className={`ccard ${c.sector}`} key={c.key}>
                 <div className="top">
-                  <h4>{c.name}</h4>
-                  <span className={`badge ${c.sector}`}>{SECTOR_EMOJI[c.sector]} {c.sector}</span>
+                  <h4>
+                    {c.name} {c.countries.map((cc) => FLAG[cc]).join(" ")}
+                  </h4>
+                  <span className={`badge ${c.sector}`}>
+                    {SECTOR_EMOJI[c.sector]} {c.sector}
+                  </span>
                 </div>
                 <p className="ats">
                   <span className="rel">
