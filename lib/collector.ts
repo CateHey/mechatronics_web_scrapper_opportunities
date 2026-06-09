@@ -312,12 +312,15 @@ function sourcesFor(country: Country): { company: string; fn: () => Promise<Raw[
   ];
 }
 
-export async function collect(country: Country = "PE", onlyMechatronics = false): Promise<CollectResult> {
+export async function collect(country: Country = "PE"): Promise<CollectResult> {
   const SOURCES = sourcesFor(country);
   const perSource: Record<string, number | "error"> = {};
   const errors: string[] = [];
   const seen = new Set<string>();
   const jobs: Job[] = [];
+
+  // Inicializa todas las empresas en 0 para que el panel de cobertura las muestre todas.
+  for (const s of SOURCES) if (!(s.company in perSource)) perSource[s.company] = 0;
 
   const results = await Promise.allSettled(SOURCES.map((s) => s.fn()));
 
@@ -325,17 +328,13 @@ export async function collect(country: Country = "PE", onlyMechatronics = false)
     const company = SOURCES[i].company;
     if (r.status === "rejected") {
       errors.push(`${company}: ${r.reason?.message || r.reason}`);
-      if (!(company in perSource)) perSource[company] = "error";
+      if (perSource[company] === 0) perSource[company] = "error";
       return;
     }
     let count = 0;
     for (const raw of r.value) {
       if (!raw || !raw.title) continue;
       const t = norm(raw.title);
-      const nivel = NIVEL.test(t);
-      const dominio = DOMINIO.test(t);
-      if (!nivel) continue;
-      if (onlyMechatronics && !dominio) continue;
       const key = company + "::" + raw.id;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -346,14 +345,20 @@ export async function collect(country: Country = "PE", onlyMechatronics = false)
         title: stripTags(raw.title),
         url: raw.url || "",
         location: raw.location || "",
-        nivel,
-        dominio,
+        nivel: NIVEL.test(t),
+        dominio: DOMINIO.test(t),
       });
       count++;
     }
-    perSource[company] = (typeof perSource[company] === "number" ? (perSource[company] as number) : 0) + count;
+    if (typeof perSource[company] === "number") perSource[company] = (perSource[company] as number) + count;
   });
 
-  jobs.sort((a, b) => Number(b.dominio) - Number(a.dominio) || a.company.localeCompare(b.company));
+  // Orden: mecatrónica primero, luego practicante/junior, luego por empresa.
+  jobs.sort(
+    (a, b) =>
+      Number(b.dominio) - Number(a.dominio) ||
+      Number(b.nivel) - Number(a.nivel) ||
+      a.company.localeCompare(b.company)
+  );
   return { jobs, perSource, errors, generatedAt: new Date().toISOString(), country };
 }

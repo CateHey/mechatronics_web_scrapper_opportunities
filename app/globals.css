@@ -306,6 +306,70 @@ a:hover {
   letter-spacing: 0.05em;
 }
 
+/* Coverage panel */
+.coverage {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px 18px;
+  margin-bottom: 26px;
+}
+.coverage-title {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.coverage-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cov {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.cov b {
+  font-weight: 800;
+}
+.cov.ok {
+  background: #34d39916;
+  border-color: #34d39955;
+  color: #a7f3d0;
+}
+.cov.ok b {
+  color: var(--green);
+}
+.cov.zero {
+  background: #161f3e;
+  color: #7c8bb5;
+}
+.cov.err {
+  background: #fb718516;
+  border-color: #fb718555;
+  color: #fecaca;
+}
+
+.tag-nivel {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--accent-2);
+  background: #22d3ee16;
+  border: 1px solid #22d3ee44;
+  padding: 1px 8px;
+  border-radius: 999px;
+  margin-left: 8px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 /* Company group */
 .group {
   margin-bottom: 24px;

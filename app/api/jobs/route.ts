@@ -7,10 +7,9 @@ export const runtime = "nodejs";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const onlyMechatronics = searchParams.get("mecatronica") === "1";
   const country = (searchParams.get("country") === "AU" ? "AU" : "PE") as Country;
   try {
-    const result = await collect(country, onlyMechatronics);
+    const result = await collect(country);
     return NextResponse.json(result, {
       headers: { "Cache-Control": "no-store" },
     });

@@ -42,6 +42,7 @@ export default function Page() {
   const [query, setQuery] = useState("");
   const [sector, setSector] = useState<Sector | "Todos">("Todos");
   const [onlyMech, setOnlyMech] = useState(false);
+  const [onlyNivel, setOnlyNivel] = useState(false);
 
   async function run(c: CountryCode) {
     setLoading((l) => ({ ...l, [c]: true }));
@@ -80,11 +81,12 @@ export default function Page() {
     const q = query.trim().toLowerCase();
     return data.jobs.filter((j) => {
       if (onlyMech && !j.dominio) return false;
+      if (onlyNivel && !j.nivel) return false;
       if (sector !== "Todos" && sectorByCompany.get(j.company) !== sector) return false;
       if (!q) return true;
       return (j.title + " " + j.company + " " + j.location).toLowerCase().includes(q);
     });
-  }, [data, query, onlyMech, sector]);
+  }, [data, query, onlyMech, onlyNivel, sector]);
 
   const grouped = useMemo(() => {
     const m = new Map<string, Job[]>();
@@ -96,6 +98,8 @@ export default function Page() {
   }, [filtered]);
 
   const mechCount = filtered.filter((j) => j.dominio).length;
+  const nivelCount = filtered.filter((j) => j.nivel).length;
+  const coverage = data ? Object.entries(data.perSource) : [];
   let jobIndex = 0;
 
   return (
@@ -138,6 +142,10 @@ export default function Page() {
               <input type="checkbox" checked={onlyMech} onChange={(e) => setOnlyMech(e.target.checked)} />
               Solo mecatrónica ⭐
             </label>
+            <label className="check">
+              <input type="checkbox" checked={onlyNivel} onChange={(e) => setOnlyNivel(e.target.checked)} />
+              Solo practicante/junior 🎓
+            </label>
           </div>
 
           <div className="chips">
@@ -159,8 +167,31 @@ export default function Page() {
                 <div className="lbl">mecatrónica ⭐</div>
               </div>
               <div className="stat">
+                <div className="num">{nivelCount}</div>
+                <div className="lbl">practicante/junior 🎓</div>
+              </div>
+              <div className="stat">
                 <div className="num">{grouped.length}</div>
                 <div className="lbl">empresas</div>
+              </div>
+            </div>
+          )}
+
+          {data && !isLoading && (
+            <div className="coverage">
+              <div className="coverage-title">
+                Cobertura — consultamos {coverage.length} empresas en {COUNTRY_LABEL[country]}, una por una:
+              </div>
+              <div className="coverage-grid">
+                {coverage.map(([name, n]) => (
+                  <span
+                    key={name}
+                    className={`cov ${n === "error" ? "err" : n === 0 ? "zero" : "ok"}`}
+                    title={n === "error" ? "La fuente no respondió" : `${n} vacante(s)`}
+                  >
+                    {name} <b>{n === "error" ? "⚠" : n}</b>
+                  </span>
+                ))}
               </div>
             </div>
           )}
@@ -214,6 +245,7 @@ export default function Page() {
                         <div className="title">
                           {j.dominio && <span className="star">⭐ </span>}
                           {j.title}
+                          {j.nivel && <span className="tag-nivel">🎓 practicante/junior</span>}
                         </div>
                         <div className="meta">📍 {j.location || company}</div>
                       </div>
