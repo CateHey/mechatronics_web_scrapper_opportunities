@@ -98,11 +98,17 @@ async function hiringRoom(subdomain: string): Promise<Raw[]> {
   });
   const html: string = data?.data?.htmlContent || "";
   const out: Raw[] = [];
-  const re = /href="([^"]*get_vacancy\/([^"\/?]+)[^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
-    const url = m[1].startsWith("http") ? m[1] : `https://${subdomain}.hiringroom.com${m[1]}`;
-    out.push({ id: m[2], title: stripTags(m[3]) || m[2], url });
+  for (const block of html.split(/<a href="\/jobs\/get_vacancy\//).slice(1)) {
+    const id = block.match(/^([^"\/?]+)/)?.[1];
+    if (!id) continue;
+    const title = stripTags(block.match(/name__vacancy">\s*([\s\S]*?)<\/h4>/)?.[1] || "");
+    const loc = stripTags(block.match(/Location-pin[\s\S]*?<\/i>\s*([\s\S]*?)<\/span>/)?.[1] || "");
+    out.push({
+      id,
+      title: title || id,
+      url: `https://${subdomain}.hiringroom.com/jobs/get_vacancy/${id}`,
+      location: loc,
+    });
   }
   return out;
 }
