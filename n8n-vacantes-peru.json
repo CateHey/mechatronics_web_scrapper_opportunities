@@ -1,0 +1,85 @@
+{
+  "name": "Vacantes Mecatrónica Perú → correo diario",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "trigger-daily",
+      "name": "Cada día 8:00 a. m.",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================================\n//  COLECTOR DE VACANTES — Mecatrónica / Practicante / Junior en Perú\n//  Pegar este código en un nodo \"Code\" de n8n (modo: Run Once for All Items).\n//  Consulta empresa por empresa su fuente oficial, filtra por mecatrónica /\n//  practicante / junior, evita repetidos (guarda los IDs ya vistos) y arma\n//  el correo HTML. Si no hay vacantes nuevas, no devuelve nada (no se envía).\n// ============================================================================\n\n// ---------- CONFIGURA AQUÍ ----------\nconst UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';\n\n// Nivel (practicante / junior). Si el título NO contiene ninguna de estas, se descarta.\nconst NIVEL = /practic|pre.?profes|trainee|junior|jr\\b|j[oó]ven|becari|egresad|intern|aprendiz|reci[eé]n/i;\n\n// Dominio (mecatrónica y afines). Sirve para marcar ⭐ las más relevantes.\nconst DOMINIO = /mecatr|mantenim|instrument|automatiz|control|el[eé]ctr|electron|confiab|mec[aá]nic|plc|scada|rob[oó]t|proces/i;\n\n// Si lo pones en true: solo deja pasar vacantes que sean NIVEL **y** DOMINIO.\n// En false (recomendado): deja pasar todo lo de nivel practicante/junior y solo\n// marca con ⭐ las de mecatrónica (así no se pierden programas tipo \"Becarios\").\nconst SOLO_MECATRONICA = false;\n// ------------------------------------\n\nconst norm = (s) => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();\nconst stripTags = (s) => (s || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\\s+/g, ' ').trim();\nconst slugToTitle = (slug) => {\n  try { slug = decodeURIComponent(slug); } catch (e) {}\n  return slug.replace(/\\.html?$/i, '').replace(/[-_]+/g, ' ').replace(/\\s+/g, ' ').trim()\n             .replace(/\\b\\w/g, (c) => c.toUpperCase());\n};\n\nasync function http(opts) {\n  return this.helpers.httpRequest({ timeout: 25000, headers: { 'User-Agent': UA }, ...opts });\n}\n\nconst jobs = [];      // {company, id, title, url, location}\nconst porFuente = {}; // conteo por empresa\nconst errores = [];   // fuentes que fallaron\n\nfunction add(company, list) {\n  let n = 0;\n  for (const j of list) {\n    if (!j || !j.title) continue;\n    jobs.push({\n      company,\n      id: String(j.id || j.url || j.title),\n      title: stripTags(j.title),\n      url: j.url || '',\n      location: j.location || '',\n    });\n    n++;\n  }\n  porFuente[company] = n;\n}\n\n// ---- Parser genérico HiringRoom (ISA REP, Southern, Cerro Verde) ----\nasync function hiringRoom(company, subdomain) {\n  const res = await http.call(this, {\n    method: 'POST',\n    url: `https://${subdomain}.hiringroom.com/jobs/getVacanciesForPortal/1`,\n    headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded' },\n    body: 'typePortal=external&selectedPage=1',\n  });\n  const data = typeof res === 'string' ? JSON.parse(res) : res;\n  const html = (data && data.data && data.data.htmlContent) || '';\n  const out = [];\n  const re = /href=\"([^\"]*get_vacancy\\/([^\"\\/?]+)[^\"]*)\"[^>]*>([\\s\\S]*?)<\\/a>/g;\n  let m;\n  while ((m = re.exec(html)) !== null) {\n    const url = m[1].startsWith('http') ? m[1] : `https://${subdomain}.hiringroom.com${m[1]}`;\n    out.push({ id: m[2], title: stripTags(m[3]) || m[2], url });\n  }\n  return out;\n}\n\n// ---- Antamina (SuccessFactors RMK — tiles HTML) ----\nasync function antamina() {\n  const html = await http.call(this, { url: 'https://mastalento.antamina.com/tile-search-results/?data=1' });\n  const out = [];\n  const re = /class=\"[^\"]*job-id-(\\d+)[^\"]*\"[^>]*data-url=\"([^\"]+)\"/g;\n  let m;\n  while ((m = re.exec(html)) !== null) {\n    const slug = (m[2].split('/job/')[1] || '').split('/')[0];\n    out.push({ id: m[1], title: slugToTitle(slug), url: 'https://mastalento.antamina.com' + m[2] });\n  }\n  return out;\n}\n\n// ---- Southern Copper — portal CAPPER (JSON oficial) ----\nasync function capper() {\n  const out = [];\n  for (const tipo of ['1', '2']) { // 1 = puestos, 2 = practicantes\n    try {\n      const res = await http.call(this, {\n        method: 'POST',\n        url: 'https://capper.southernperu.com.pe/capper/ListadoOfertas.aspx/GetListOfertas',\n        headers: { 'Content-Type': 'application/json; charset=utf-8' },\n        body: { tipo },\n        json: true,\n      });\n      let d = res && res.d;\n      if (typeof d === 'string') d = JSON.parse(d);\n      let lst = d && d.lstOfertas;\n      if (typeof lst === 'string') lst = JSON.parse(lst);\n      const arr = Array.isArray(lst) ? lst : (lst ? Object.values(lst) : []);\n      for (const o of arr) {\n        const id = o.IdOferta || o.idOferta || o.Id || o.codigo || JSON.stringify(o).slice(0, 40);\n        const title = o.Titulo || o.titulo || o.NombrePuesto || o.Puesto || o.descripcion || '';\n        out.push({ id: String(id), title, url: 'https://capper.southernperu.com.pe/capper/ListadoOfertas.aspx?tipo=' + tipo, location: o.Lugar || o.Ubicacion || '' });\n      }\n    } catch (e) { /* CAPPER suele estar vacío; el respaldo es HiringRoom */ }\n  }\n  return out;\n}\n\n// ---- Las Bambas / MMG (sitemap.xml) ----\nasync function lasBambas() {\n  const xml = await http.call(this, { url: 'https://careers.mmg.com/sitemap.xml' });\n  const out = [];\n  const re = /<loc>([^<]+)<\\/loc>/g;\n  let m;\n  while ((m = re.exec(xml)) !== null) {\n    const url = m[1].trim();\n    if (!/\\/jobs\\//i.test(url)) continue;\n    if (!/peru|apurimac|lima-office|las-bambas/i.test(url)) continue;\n    const slug = url.split('/jobs/')[1].replace(/\\/$/, '');\n    out.push({ id: url, title: slugToTitle(slug), url });\n  }\n  return out;\n}\n\n// ---- ABB (Phenom widgets — JSON con filtro Perú) ----\nasync function abb() {\n  const res = await http.call(this, {\n    method: 'POST',\n    url: 'https://careers.abb/widgets',\n    headers: { 'Content-Type': 'application/json' },\n    body: {\n      lang: 'en_global', deviceType: 'desktop', country: 'global', pageName: 'search-results',\n      ddoKey: 'refineSearch', sortBy: '', subsearch: '', from: 0, jobs: true, counts: true,\n      all_fields: ['category', 'country', 'state', 'city'], size: 50, keywords: '', global: true,\n      selected_fields: { country: ['Peru'] }, locationData: {},\n    },\n    json: true,\n  });\n  const list = (((res || {}).refineSearch || {}).data || {}).jobs || [];\n  return list.map((j) => ({\n    id: j.jobId || j.reqId || j.jobSeqNo || j.applyUrl,\n    title: j.title,\n    url: j.applyUrl || j.jobUrl || 'https://careers.abb/global/en/search-results',\n    location: (j.multi_location && j.multi_location[0]) || j.state || j.city || 'Peru',\n  }));\n}\n\n// ---- Rockwell Automation (Workday CXS) ----\nasync function workday(company, tenant, site) {\n  const res = await http.call(this, {\n    method: 'POST',\n    url: `https://${tenant}.wd1.myworkdayjobs.com/wday/cxs/${tenant}/${site}/jobs`,\n    headers: { 'Content-Type': 'application/json' },\n    body: { appliedFacets: {}, limit: 20, offset: 0, searchText: 'Peru' },\n    json: true,\n  });\n  const list = (res || {}).jobPostings || [];\n  return list\n    .filter((j) => /peru|lima/i.test(j.locationsText || ''))\n    .map((j) => ({\n      id: j.externalPath || j.bulletFields && j.bulletFields[0] || j.title,\n      title: j.title,\n      url: `https://${tenant}.wd1.myworkdayjobs.com/en-US/${site}` + (j.externalPath || ''),\n      location: j.locationsText || 'Peru',\n    }));\n}\n\n// ---- Schneider Electric (Eightfold — filtro Perú en cliente) ----\nasync function schneider() {\n  const out = [];\n  const kws = ['practicante', 'junior', 'mantenimiento', 'automatizacion', 'mecatronica', 'control'];\n  for (const kw of kws) {\n    try {\n      const res = await http.call(this, {\n        url: `https://careers.se.com/api/jobs?query=${encodeURIComponent(kw)}&start=0&num=10&sort_by=timestamp`,\n        json: true,\n      });\n      const list = (res && (res.positions || res.jobs || res.data)) || [];\n      for (const j of list) {\n        const loc = j.location || (j.data && j.data.full_location) || j.full_location || '';\n        if (!/peru|lima/i.test(loc)) continue;\n        out.push({\n          id: j.id || j.display_job_id || j.canonicalPositionUrl,\n          title: j.name || j.title || (j.data && j.data.title),\n          url: j.canonicalPositionUrl || j.absolute_url || 'https://careers.se.com/global/jobs',\n          location: loc,\n        });\n      }\n    } catch (e) { /* ignora keyword que falle */ }\n  }\n  return out;\n}\n\n// ---- LinkedIn guest API (Siemens, ENGIE, Kallpa, Electroperú) ----\n// Puede ser bloqueado desde IPs de servidor (respuesta 999). Es un respaldo.\nasync function linkedin(company, query) {\n  const html = await http.call(this, {\n    url: `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(query)}&location=Peru&start=0`,\n  });\n  const out = [];\n  const re = /data-entity-urn=\"urn:li:jobPosting:(\\d+)\"[\\s\\S]*?base-search-card__title\">\\s*([\\s\\S]*?)<\\/h3>[\\s\\S]*?base-card__full-link\"\\s*href=\"([^\"?]+)/g;\n  let m;\n  while ((m = re.exec(html)) !== null) {\n    out.push({ id: m[1], title: stripTags(m[2]), url: m[3] });\n  }\n  return out;\n}\n\n// ---- Electroperú (SharePoint — detecta PDFs de convocatoria) ----\nasync function electroperu() {\n  const html = await http.call(this, { url: 'http://www.electroperu.com.pe/SitePages/Ofertas%20Laborales.aspx' });\n  const out = [];\n  const re = /href=\"([^\"]+\\.pdf)\"/gi;\n  let m;\n  while ((m = re.exec(html)) !== null) {\n    let url = m[1];\n    if (!/^https?:/i.test(url)) url = 'http://www.electroperu.com.pe' + (url.startsWith('/') ? '' : '/') + url;\n    const name = (url.split('/').pop() || '').replace(/%20/g, ' ');\n    out.push({ id: url, title: slugToTitle(name), url });\n  }\n  return out;\n}\n\n// ============================ EJECUCIÓN ============================\nconst fuentes = [\n  ['ISA REP',         () => hiringRoom.call(this, 'ISA REP', 'rep')],\n  ['Southern Copper', () => hiringRoom.call(this, 'Southern Copper', 'southernperu')],\n  ['Southern (CAPPER)', () => capper.call(this)],\n  ['Cerro Verde',     () => hiringRoom.call(this, 'Cerro Verde', 'cerroverde')],\n  ['Antamina',        () => antamina.call(this)],\n  ['Las Bambas',      () => lasBambas.call(this)],\n  ['ABB',             () => abb.call(this)],\n  ['Rockwell',        () => workday.call(this, 'Rockwell', 'rockwellautomation', 'External_Rockwell_Automation')],\n  ['Schneider',       () => schneider.call(this)],\n  ['Siemens',         () => linkedin.call(this, 'Siemens', 'Siemens')],\n  ['Siemens Energy',  () => linkedin.call(this, 'Siemens Energy', 'Siemens Energy')],\n  ['ENGIE',           () => linkedin.call(this, 'ENGIE', 'ENGIE')],\n  ['Kallpa',          () => linkedin.call(this, 'Kallpa', 'Kallpa Generacion')],\n  ['Electroperú',     () => electroperu.call(this)],\n];\n\nfor (const [name, fn] of fuentes) {\n  try {\n    const list = await fn();\n    add(name, list);\n  } catch (e) {\n    errores.push(`${name}: ${e.message}`);\n    porFuente[name] = 'ERROR';\n  }\n}\n\n// ---- Filtro nivel/dominio ----\nconst relevantes = jobs.filter((j) => {\n  const t = norm(j.title);\n  const nivel = NIVEL.test(t);\n  const dom = DOMINIO.test(t);\n  return SOLO_MECATRONICA ? (nivel && dom) : nivel;\n});\n\n// ---- Dedup contra lo ya visto (memoria del workflow) ----\nconst sd = $getWorkflowStaticData('global');\nsd.seen = sd.seen || {};\nconst hoy = new Date().toISOString().slice(0, 10);\nconst nuevas = [];\nfor (const j of relevantes) {\n  const key = j.company + '::' + j.id;\n  if (!sd.seen[key]) {\n    nuevas.push(j);\n    sd.seen[key] = hoy;\n  }\n}\n// Limpieza: olvida lo visto hace más de 120 días\nconst limite = new Date(Date.now() - 120 * 864e5).toISOString().slice(0, 10);\nfor (const k of Object.keys(sd.seen)) if (sd.seen[k] < limite) delete sd.seen[k];\n\n// ---- Si no hay nada nuevo, no enviar correo ----\nif (nuevas.length === 0) {\n  return [];\n}\n\n// ---- Marca ⭐ y ordena (mecatrónica primero) ----\nfor (const j of nuevas) j.estrella = DOMINIO.test(norm(j.title));\nnuevas.sort((a, b) => (b.estrella - a.estrella) || a.company.localeCompare(b.company));\n\n// ---- Arma el correo HTML ----\nconst esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst porEmpresa = {};\nfor (const j of nuevas) (porEmpresa[j.company] = porEmpresa[j.company] || []).push(j);\n\nlet html = `<div style=\"font-family:Arial,Helvetica,sans-serif;max-width:680px;margin:auto;color:#222\">`;\nhtml += `<h2 style=\"color:#1a5276\">🔧 ${nuevas.length} vacante(s) nueva(s) para practicante / junior</h2>`;\nhtml += `<p style=\"color:#555\">Empresas de energía, minería y automatización en Perú · ${hoy}<br>⭐ = relacionada con mecatrónica / mantenimiento / automatización.</p>`;\nfor (const empresa of Object.keys(porEmpresa)) {\n  html += `<h3 style=\"margin:18px 0 6px;border-bottom:2px solid #eee;padding-bottom:4px\">${esc(empresa)}</h3><ul style=\"padding-left:18px\">`;\n  for (const j of porEmpresa[empresa]) {\n    const star = j.estrella ? '⭐ ' : '';\n    const loc = j.location ? ` <span style=\"color:#888\">— ${esc(j.location)}</span>` : '';\n    const link = j.url ? `<a href=\"${esc(j.url)}\" style=\"color:#1a5276;text-decoration:none\">${star}${esc(j.title)}</a>` : `${star}${esc(j.title)}`;\n    html += `<li style=\"margin:5px 0\">${link}${loc}</li>`;\n  }\n  html += `</ul>`;\n}\nconst fuenteResumen = Object.entries(porFuente).map(([k, v]) => `${k}: ${v}`).join(' · ');\nhtml += `<hr style=\"border:none;border-top:1px solid #eee;margin:20px 0\">`;\nhtml += `<p style=\"font-size:11px;color:#999\">Encontradas por fuente — ${esc(fuenteResumen)}.${errores.length ? ' Fuentes con error: ' + esc(errores.join('; ')) + '.' : ''}</p>`;\nhtml += `<p style=\"font-size:11px;color:#999\">Generado automáticamente con n8n. Postula pronto: las vacantes de practicante se cierran rápido.</p></div>`;\n\nconst asunto = `🔧 ${nuevas.length} nueva(s) vacante(s) practicante/junior — ${hoy}`;\n\nreturn [{ json: { hayNuevas: true, totalNuevas: nuevas.length, asunto, html, fecha: hoy, porFuente, errores } }];\n"
+      },
+      "id": "code-collector",
+      "name": "Recolectar vacantes (todas las empresas)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "TU-CORREO@gmail.com",
+        "toEmail": "CORREO-DE-TU-HERMANO@gmail.com",
+        "subject": "={{ $json.asunto }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Enviar correo al hermano",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        760,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Cada día 8:00 a. m.": {
+      "main": [
+        [
+          {
+            "node": "Recolectar vacantes (todas las empresas)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recolectar vacantes (todas las empresas)": {
+      "main": [
+        [
+          {
+            "node": "Enviar correo al hermano",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
