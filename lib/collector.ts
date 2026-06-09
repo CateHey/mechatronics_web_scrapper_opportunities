@@ -2,27 +2,10 @@
 // en paralelo y con tolerancia a fallos. Soporta Perú y Australia.
 // Verificado el 2026-06-09.
 
-export type Country = "PE" | "AU";
-
-export const COUNTRY: Record<Country, { name: string; flag: string; label: string; regex: RegExp }> = {
-  PE: {
-    name: "Peru",
-    flag: "🇵🇪",
-    label: "Perú",
-    regex: /peru|per[uú]|lima|apurimac|arequipa|cusco|cuzco|moquegua|tacna|ancash|ica|junin|callao/i,
-  },
-  AU: {
-    name: "Australia",
-    flag: "🇦🇺",
-    label: "Australia",
-    regex:
-      /australia|perth|sydney|melbourne|brisbane|adelaide|canberra|queensland|western australia|new south wales|victoria|\bnsw\b|\bqld\b|\bwa\b|\bvic\b|\bsa\b|\bnt\b/i,
-  },
-};
+const PERU_REGEX = /peru|per[uú]|lima|apurimac|arequipa|cusco|cuzco|moquegua|tacna|ancash|ica|junin|callao/i;
 
 export interface Job {
   company: string;
-  country: Country;
   id: string;
   title: string;
   url: string;
@@ -36,7 +19,6 @@ export interface CollectResult {
   perSource: Record<string, number | "error">;
   errors: string[];
   generatedAt: string;
-  country: Country;
 }
 
 const UA =
@@ -280,40 +262,26 @@ async function electroperu(): Promise<Raw[]> {
   return out;
 }
 
-function sourcesFor(country: Country): { company: string; fn: () => Promise<Raw[]> }[] {
-  const C = COUNTRY[country];
-  const global = [
-    { company: "ABB", fn: () => abb(C.name) },
-    { company: "Rockwell Automation", fn: () => workday("rockwellautomation", "External_Rockwell_Automation", C.name, C.regex) },
-    { company: "Schneider Electric", fn: () => schneider(C.regex) },
-    { company: "Siemens", fn: () => linkedin("Siemens", C.name) },
-  ];
-  if (country === "PE") {
-    return [
-      ...global,
-      { company: "ISA REP", fn: () => hiringRoom("rep") },
-      { company: "Southern Copper", fn: () => hiringRoom("southernperu") },
-      { company: "Southern Copper", fn: () => capper() },
-      { company: "Cerro Verde", fn: () => hiringRoom("cerroverde") },
-      { company: "Antamina", fn: () => antamina() },
-      { company: "Las Bambas (MMG)", fn: () => mmg(C.regex) },
-      { company: "ENGIE Energía Perú", fn: () => linkedin("ENGIE", "Peru") },
-      { company: "Kallpa Generación", fn: () => linkedin("Kallpa Generacion", "Peru") },
-      { company: "Electroperú", fn: () => electroperu() },
-    ];
-  }
+function sourcesFor(): { company: string; fn: () => Promise<Raw[]> }[] {
   return [
-    ...global,
-    { company: "MMG", fn: () => mmg(C.regex) },
-    { company: "BHP", fn: () => linkedin("BHP", "Australia") },
-    { company: "Rio Tinto", fn: () => linkedin("Rio Tinto", "Australia") },
-    { company: "Fortescue", fn: () => linkedin("Fortescue", "Australia") },
-    { company: "Woodside Energy", fn: () => linkedin("Woodside Energy", "Australia") },
+    { company: "ABB", fn: () => abb("Peru") },
+    { company: "Rockwell Automation", fn: () => workday("rockwellautomation", "External_Rockwell_Automation", "Peru", PERU_REGEX) },
+    { company: "Schneider Electric", fn: () => schneider(PERU_REGEX) },
+    { company: "Siemens", fn: () => linkedin("Siemens", "Peru") },
+    { company: "ISA REP", fn: () => hiringRoom("rep") },
+    { company: "Southern Copper", fn: () => hiringRoom("southernperu") },
+    { company: "Southern Copper", fn: () => capper() },
+    { company: "Cerro Verde", fn: () => hiringRoom("cerroverde") },
+    { company: "Antamina", fn: () => antamina() },
+    { company: "Las Bambas (MMG)", fn: () => mmg(PERU_REGEX) },
+    { company: "ENGIE Energía Perú", fn: () => linkedin("ENGIE", "Peru") },
+    { company: "Kallpa Generación", fn: () => linkedin("Kallpa Generacion", "Peru") },
+    { company: "Electroperú", fn: () => electroperu() },
   ];
 }
 
-export async function collect(country: Country = "PE"): Promise<CollectResult> {
-  const SOURCES = sourcesFor(country);
+export async function collect(): Promise<CollectResult> {
+  const SOURCES = sourcesFor();
   const perSource: Record<string, number | "error"> = {};
   const errors: string[] = [];
   const seen = new Set<string>();
@@ -340,7 +308,6 @@ export async function collect(country: Country = "PE"): Promise<CollectResult> {
       seen.add(key);
       jobs.push({
         company,
-        country,
         id: raw.id,
         title: stripTags(raw.title),
         url: raw.url || "",
@@ -360,5 +327,5 @@ export async function collect(country: Country = "PE"): Promise<CollectResult> {
       Number(b.nivel) - Number(a.nivel) ||
       a.company.localeCompare(b.company)
   );
-  return { jobs, perSource, errors, generatedAt: new Date().toISOString(), country };
+  return { jobs, perSource, errors, generatedAt: new Date().toISOString() };
 }

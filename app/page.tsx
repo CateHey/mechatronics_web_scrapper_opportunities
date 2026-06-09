@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { COMPANIES, type Sector, type CountryCode } from "@/lib/companies";
+import { COMPANIES, type Sector } from "@/lib/companies";
 
 interface Job {
   company: string;
-  country: CountryCode;
   id: string;
   title: string;
   url: string;
@@ -18,16 +17,11 @@ interface ApiResult {
   perSource: Record<string, number | "error">;
   errors: string[];
   generatedAt: string;
-  country: CountryCode;
   error?: string;
 }
 
-type Tab = "PE" | "AU" | "empresas";
-
 const SECTORS: (Sector | "Todos")[] = ["Todos", "Automatización", "Minería", "Energía"];
 const SECTOR_EMOJI: Record<string, string> = { Automatización: "⚙️", Minería: "⛏️", Energía: "⚡" };
-const FLAG: Record<CountryCode, string> = { PE: "🇵🇪", AU: "🇦🇺" };
-const COUNTRY_LABEL: Record<CountryCode, string> = { PE: "Perú", AU: "Australia" };
 const RELIABILITY_LABEL: Record<string, string> = {
   solida: "Fuente sólida",
   parcial: "Fuente parcial",
@@ -36,45 +30,30 @@ const RELIABILITY_LABEL: Record<string, string> = {
 const sectorByCompany = new Map<string, Sector>(COMPANIES.map((c) => [c.name, c.sector]));
 
 export default function Page() {
-  const [tab, setTab] = useState<Tab>("PE");
-  const [cache, setCache] = useState<Partial<Record<CountryCode, ApiResult>>>({});
-  const [loading, setLoading] = useState<Partial<Record<CountryCode, boolean>>>({});
+  const [tab, setTab] = useState<"vacantes" | "empresas">("vacantes");
+  const [data, setData] = useState<ApiResult | null>(null);
+  const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [sector, setSector] = useState<Sector | "Todos">("Todos");
   const [onlyMech, setOnlyMech] = useState(false);
   const [onlyNivel, setOnlyNivel] = useState(false);
 
-  async function run(c: CountryCode) {
-    setLoading((l) => ({ ...l, [c]: true }));
+  async function run() {
+    setLoading(true);
     try {
-      const res = await fetch(`/api/jobs?country=${c}&mecatronica=0`);
-      const json = (await res.json()) as ApiResult;
-      setCache((p) => ({ ...p, [c]: json }));
+      const res = await fetch(`/api/jobs`);
+      setData((await res.json()) as ApiResult);
     } catch {
-      setCache((p) => ({
-        ...p,
-        [c]: { jobs: [], perSource: {}, errors: ["No se pudo conectar"], generatedAt: "", country: c, error: "fetch" },
-      }));
+      setData({ jobs: [], perSource: {}, errors: ["No se pudo conectar"], generatedAt: "", error: "fetch" });
     } finally {
-      setLoading((l) => ({ ...l, [c]: false }));
+      setLoading(false);
     }
   }
 
   useEffect(() => {
-    run("PE");
+    run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  function selectTab(t: Tab) {
-    setTab(t);
-    setQuery("");
-    setSector("Todos");
-    if ((t === "PE" || t === "AU") && !cache[t] && !loading[t]) run(t);
-  }
-
-  const country: CountryCode = tab === "AU" ? "AU" : "PE";
-  const data = cache[country] ?? null;
-  const isLoading = !!loading[country];
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -106,31 +85,28 @@ export default function Page() {
     <div className="wrap">
       <div className="bg-orbs" aria-hidden />
       <header className="hero">
-        <div className="pill-top">⚡ En vivo desde las fuentes oficiales</div>
+        <div className="pill-top">🇵🇪 En vivo desde las fuentes oficiales · Perú</div>
         <h1>Vacantes Mecatrónica</h1>
         <p>
           Practicantes y junior en las mejores empresas de <b>energía</b>, <b>minería</b> y{" "}
-          <b>automatización industrial</b>. Busca en tiempo real.
+          <b>automatización industrial</b> del Perú. Búsqueda en tiempo real, empresa por empresa.
         </p>
       </header>
 
       <div className="tabs">
-        <button className={`tab ${tab === "PE" ? "active" : ""}`} onClick={() => selectTab("PE")}>
-          🇵🇪 Vacantes Perú
+        <button className={`tab ${tab === "vacantes" ? "active" : ""}`} onClick={() => setTab("vacantes")}>
+          🔧 Vacantes
         </button>
-        <button className={`tab ${tab === "AU" ? "active" : ""}`} onClick={() => selectTab("AU")}>
-          🇦🇺 Vacantes Australia
-        </button>
-        <button className={`tab ${tab === "empresas" ? "active" : ""}`} onClick={() => selectTab("empresas")}>
+        <button className={`tab ${tab === "empresas" ? "active" : ""}`} onClick={() => setTab("empresas")}>
           🏢 Empresas y fuentes
         </button>
       </div>
 
-      {(tab === "PE" || tab === "AU") && (
+      {tab === "vacantes" && (
         <>
           <div className="controls">
-            <button className="btn" onClick={() => run(country)} disabled={isLoading}>
-              {isLoading ? "Buscando…" : "🔄 Actualizar"}
+            <button className="btn" onClick={run} disabled={loading}>
+              {loading ? "Buscando…" : "🔄 Actualizar"}
             </button>
             <input
               className="input"
@@ -156,7 +132,7 @@ export default function Page() {
             ))}
           </div>
 
-          {data && !isLoading && (
+          {data && !loading && (
             <div className="stats">
               <div className="stat">
                 <div className="num">{filtered.length}</div>
@@ -177,10 +153,10 @@ export default function Page() {
             </div>
           )}
 
-          {data && !isLoading && (
+          {data && !loading && (
             <div className="coverage">
               <div className="coverage-title">
-                Cobertura — consultamos {coverage.length} empresas en {COUNTRY_LABEL[country]}, una por una:
+                Cobertura — consultamos {coverage.length} empresas peruanas, una por una:
               </div>
               <div className="coverage-grid">
                 {coverage.map(([name, n]) => (
@@ -196,36 +172,29 @@ export default function Page() {
             </div>
           )}
 
-          {isLoading && (
+          {loading && (
             <div className="state">
               <div className="spinner" />
-              Consultando empresa por empresa en {COUNTRY_LABEL[country]}… (puede tardar ~15–30 s)
+              Consultando empresa por empresa… (puede tardar ~15–30 s)
             </div>
           )}
 
-          {!isLoading && data && data.errors.length > 0 && (
+          {!loading && data && data.errors.length > 0 && (
             <div className="note">
               ⚠️ Algunas fuentes no respondieron (suele ser LinkedIn bloqueando IPs de servidor):{" "}
               {data.errors.map((e) => e.split(":")[0]).join(", ")}. El resto sí se consultó.
             </div>
           )}
 
-          {tab === "AU" && !isLoading && data && (
-            <div className="note">
-              🇦🇺 Australia es experimental: usa las APIs de ABB, Rockwell, Schneider y MMG (sólidas) más LinkedIn
-              para BHP, Rio Tinto, Fortescue y Woodside (este último puede venir vacío desde el servidor).
-            </div>
-          )}
-
-          {!isLoading && data && filtered.length === 0 && (
+          {!loading && data && filtered.length === 0 && (
             <div className="state">
-              😶 No hay vacantes de practicante/junior con esos filtros ahora mismo en {COUNTRY_LABEL[country]}.
+              😶 No hay vacantes con esos filtros ahora mismo.
               <br />
               Prueba quitar filtros o revisa “Empresas y fuentes”.
             </div>
           )}
 
-          {!isLoading &&
+          {!loading &&
             grouped.map(([company, jobs]) => {
               const sec = sectorByCompany.get(company);
               return (
@@ -272,9 +241,7 @@ export default function Page() {
             {COMPANIES.map((c) => (
               <div className={`ccard ${c.sector}`} key={c.key}>
                 <div className="top">
-                  <h4>
-                    {c.name} {c.countries.map((cc) => FLAG[cc]).join(" ")}
-                  </h4>
+                  <h4>{c.name}</h4>
                   <span className={`badge ${c.sector}`}>
                     {SECTOR_EMOJI[c.sector]} {c.sector}
                   </span>
@@ -300,7 +267,7 @@ export default function Page() {
       )}
 
       <div className="footer">
-        Hecho para mecatrónicos · Vacantes consultadas en vivo desde las fuentes oficiales de cada empresa.
+        Hecho para mecatrónicos en Perú · Vacantes consultadas en vivo desde las fuentes oficiales de cada empresa.
         <br />
         Incluye además un workflow de n8n para recibir las vacantes nuevas por correo (ver repositorio).
       </div>

@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
-import { collect, type Country } from "@/lib/collector";
+import { collect } from "@/lib/collector";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // permite consultar todas las fuentes
 export const runtime = "nodejs";
 
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const country = (searchParams.get("country") === "AU" ? "AU" : "PE") as Country;
+export async function GET() {
   try {
-    const result = await collect(country);
+    const result = await collect();
     return NextResponse.json(result, {
       headers: { "Cache-Control": "no-store" },
     });
